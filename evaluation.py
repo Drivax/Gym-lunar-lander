@@ -34,7 +34,7 @@ def make_eval_env(use_perturbations=True, seed=123):
 
 USE_PERTURBATIONS = True
 N_EPISODES = 20
-MODEL_PATH = "ppo_lunar_lander_robust_final"
+MODEL_PATH = "models/ppo_lunar_lander_robust_final"
 SAVE_GIF_EVERY = 10
 GIF_PREFIX = "landing_perturbed" if USE_PERTURBATIONS else "landing_vanilla"
 
