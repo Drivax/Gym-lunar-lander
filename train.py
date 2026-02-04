@@ -1,7 +1,3 @@
-# ==================================================
-# PPO LUNAR LANDER ROBUSTE – VERSION AMÉLIORÉE
-# ==================================================
-
 import gymnasium as gym
 import torch
 from stable_baselines3 import PPO
@@ -9,12 +5,9 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
+from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 
 from envs.wrappers import NoisyObservations, ActionDelayAware
-
-# ==================================================
-# ENV FACTORY
-# ==================================================
 
 def make_single_env(
     seed: int,
@@ -31,9 +24,6 @@ def make_single_env(
             wind_power=wind_power,
             turbulence_power=turbulence_power,
         )
-
-        env.reset(seed=seed)
-
 
         env = ActionDelayAware(env, max_delay=max_delay)
 
@@ -55,13 +45,7 @@ def make_vec_env_robust(
     vecnorm_path: str | None = None,
 ):
     env_fns = [
-        make_single_env(
-            seed + i,
-            noise_std,
-            wind_power,
-            turbulence_power,
-            max_delay,
-        )
+        make_single_env(seed + i, noise_std, wind_power, turbulence_power, max_delay)
         for i in range(n_envs)
     ]
 
@@ -70,31 +54,25 @@ def make_vec_env_robust(
     if vecnorm_path:
         vec_env = VecNormalize.load(vecnorm_path, vec_env)
         vec_env.training = True
+        vec_env.norm_reward = True
     else:
         vec_env = VecNormalize(
             vec_env,
             norm_obs=True,
-            norm_reward=True,   # LunarLander
+            norm_reward=True,
             clip_obs=10.0,
+            clip_reward=50.0,
             gamma=0.99,
         )
 
     return vec_env
 
 
-# ==================================================
-# LEARNING RATE SCHEDULE
-# ==================================================
-
-def linear_schedule(initial_lr):
-    def schedule(progress):
-        return initial * (0.2 + 0.8 * progress)
+def linear_schedule(initial_lr: float, final_lr_ratio: float = 0.2):
+    def schedule(progress_remaining: float) -> float:
+        return initial_lr * (final_lr_ratio + (1 - final_lr_ratio) * progress_remaining)
     return schedule
 
-
-# ==================================================
-# TRAINING PHASE
-# ==================================================
 
 def train_phase(
     name: str,
@@ -102,18 +80,49 @@ def train_phase(
     env_kwargs: dict,
     model: PPO | None = None,
     vecnorm_path: str | None = None,
+    eval_freq: int = 50000,
+    save_freq: int = 250000,
 ):
-    print(f"\n===== {name} =====")
+    print(f"\n===== {name} – {total_timesteps:,} timesteps =====")
 
-    env = make_vec_env_robust(
-        **env_kwargs,
-        vecnorm_path=vecnorm_path,
+    train_env = make_vec_env_robust(**env_kwargs, vecnorm_path=vecnorm_path)
+
+    eval_env = make_vec_env_robust(
+        n_envs=1,
+        seed=env_kwargs["seed"] + 10000,
+        **{k: v for k, v in env_kwargs.items() if k != "n_envs" and k != "seed"},
+        vecnorm_path=None,
     )
+    eval_env = VecNormalize.load(vecnorm_path or "dummy", eval_env) if vecnorm_path else VecNormalize(eval_env)
+    eval_env.training = False
+    eval_env.norm_reward = False
+
+    callbacks = []
+
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=f"models/best_{name.lower().replace(' ', '_')}",
+        log_path=f"logs/{name.lower().replace(' ', '_')}",
+        eval_freq=eval_freq // env_kwargs["n_envs"],
+        deterministic=True,
+        render=False,
+        n_eval_episodes=15,
+    )
+    callbacks.append(eval_callback)
+
+    checkpoint_callback = CheckpointCallback(
+        save_freq=save_freq // env_kwargs["n_envs"],
+        save_path=f"models/checkpoints_{name.lower().replace(' ', '_')}",
+        name_prefix="checkpoint",
+        save_replay_buffer=False,
+        save_vecnormalize=True,
+    )
+    callbacks.append(checkpoint_callback)
 
     if model is None:
         model = PPO(
             "MlpPolicy",
-            env,
+            train_env,
             learning_rate=linear_schedule(3e-4),
             n_steps=2048,
             batch_size=512,
@@ -121,45 +130,44 @@ def train_phase(
             gamma=0.99,
             gae_lambda=0.95,
             clip_range=0.2,
-            ent_coef=0.003,
+            ent_coef=0.005,
             vf_coef=0.5,
             max_grad_norm=0.5,
             policy_kwargs=dict(
-                net_arch=dict(pi=[256, 256], vf=[512, 512]),
-                activation_fn=torch.nn.ReLU,
+                net_arch=dict(pi=[256, 256, 128], vf=[512, 256, 128]),
+                activation_fn=torch.nn.Tanh,
                 ortho_init=True,
             ),
+            tensorboard_log="logs/ppo_lander_robust/",
             seed=42,
             verbose=1,
         )
     else:
-        model.set_env(env)
+        model.set_env(train_env)
 
     model.learn(
         total_timesteps=total_timesteps,
+        callback=callbacks,
         progress_bar=True,
-        log_interval=10,
+        log_interval=5,
     )
 
-    return model, env
+    vecnorm_final_path = f"models/vecnorm_{name.lower().replace(' ', '_')}.pkl"
+    train_env.save(vecnorm_final_path)
 
+    return model, train_env, vecnorm_final_path
 
-# ==================================================
-# MAIN (WINDOWS SAFE)
-# ==================================================
 
 if __name__ == "__main__":
 
     logger = configure("logs/ppo_lander_robust/", ["tensorboard"])
 
-    N_ENVS = 8
+    N_ENVS = 12
 
-    # -------------------------
-    # PHASE 1 – BASELINE
-    # -------------------------
-    model, env = train_phase(
-        "PHASE 1 – Sans perturbations",
-        total_timesteps=1_000_000,
+    # PHASE 1 – BASELINE (sans perturbations)
+    model, env1, vecnorm1 = train_phase(
+        "PHASE 1 – Baseline",
+        total_timesteps=1_200_000,
         env_kwargs=dict(
             n_envs=N_ENVS,
             seed=42,
@@ -169,14 +177,11 @@ if __name__ == "__main__":
             max_delay=0,
         ),
     )
-    env.save("models/vecnorm_phase1.pkl")
 
-    # -------------------------
-    # PHASE 2 – PERTURBATIONS MODÉRÉES
-    # -------------------------
-    model, env = train_phase(
-        "PHASE 2 – Vent + bruit",
-        total_timesteps=1_500_000,
+    # PHASE 2 – Perturbations modérées
+    model, env2, vecnorm2 = train_phase(
+        "PHASE 2 – Perturbations modérées",
+        total_timesteps=1_800_000,
         env_kwargs=dict(
             n_envs=N_ENVS,
             seed=100,
@@ -186,16 +191,13 @@ if __name__ == "__main__":
             max_delay=1,
         ),
         model=model,
-        vecnorm_path="models/vecnorm_phase1.pkl",
+        vecnorm_path=vecnorm1,
     )
-    env.save("models/vecnorm_phase2.pkl")
 
-    # -------------------------
-    # PHASE 3 – ROBUST FINAL
-    # -------------------------
-    model, env = train_phase(
-        "PHASE 3 – Setup robuste final",
-        total_timesteps=2_000_000,
+    # PHASE 3 – Perturbations fortes (final robuste)
+    model, env3, vecnorm3 = train_phase(
+        "PHASE 3 – Robust Final",
+        total_timesteps=3_000_000,
         env_kwargs=dict(
             n_envs=N_ENVS,
             seed=200,
@@ -205,10 +207,12 @@ if __name__ == "__main__":
             max_delay=3,
         ),
         model=model,
-        vecnorm_path="models/vecnorm_phase2.pkl",
+        vecnorm_path=vecnorm2,
     )
-    env.save("models/vecnorm_phase3.pkl")
 
     model.save("models/ppo_lunar_lander_robust_final")
 
     print("\nENTRAÎNEMENT TERMINÉ")
+    print("→ Modèle final : models/ppo_lunar_lander_robust_final.zip")
+    print("→ VecNormalize final : models/vecnorm_phase_3_robust.pkl")
+    print("→ Logs TensorBoard : tensorboard --logdir logs/ppo_lander_robust/")
