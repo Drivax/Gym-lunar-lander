@@ -71,14 +71,7 @@ class ActionDelayAware(gym.Wrapper):
         obs = np.concatenate([obs, self.last_action])
 
         return obs, reward, terminated, truncated, info
-
 class ActionDelayAwareEval(gym.Wrapper):
-    """
-    Wrapper d'évaluation :
-    - applique un délai d'action aléatoire
-    - ajoute toujours last_action à l'observation
-    - observation = [obs_env, last_action]
-    """
 
     def __init__(self, env, max_delay=0):
         super().__init__(env)
@@ -87,60 +80,80 @@ class ActionDelayAwareEval(gym.Wrapper):
         self.delay_queue = deque()
         self.current_delay = 0
 
-        # Dimension action
-        self.action_dim = int(np.prod(env.action_space.shape))
-        self.last_action = np.zeros(self.action_dim, dtype=np.float32)
+        self.last_action = np.zeros(1, dtype=np.float32)
 
-        # Observation space étendue
-        low = np.concatenate([
-            env.observation_space.low,
-            -np.ones(self.action_dim, dtype=np.float32)
-        ])
-        high = np.concatenate([
-            env.observation_space.high,
-            np.ones(self.action_dim, dtype=np.float32)
-        ])
+        low = np.concatenate([env.observation_space.low, [-1]])
+        high = np.concatenate([env.observation_space.high, [1]])
 
-        self.observation_space = gym.spaces.Box(
-            low=low,
-            high=high,
-            dtype=np.float32
-        )
+        self.observation_space = gym.spaces.Box(low, high, dtype=np.float32)
 
-    def reset(self, *, seed=None, options=None):
+    def reset(self, **kwargs):
+
         self.delay_queue.clear()
 
-        self.current_delay = (
-            np.random.randint(0, self.max_delay + 1)
-            if self.max_delay > 0 else 0
-        )
+        if self.max_delay > 0:
+            self.current_delay = np.random.randint(0, self.max_delay + 1)
+        else:
+            self.current_delay = 0
 
-        self.last_action = np.zeros(self.action_dim, dtype=np.float32)
+        self.last_action = np.zeros(1, dtype=np.float32)
 
-        obs, info = self.env.reset(seed=seed, options=options)
+        obs, info = self.env.reset(**kwargs)
+
         obs = np.asarray(obs, dtype=np.float32)
 
         obs = np.concatenate([obs, self.last_action])
+
         return obs, info
 
     def step(self, action):
-        # Sécurisation stricte des dimensions
-        action = np.asarray(action, dtype=np.float32).reshape(self.action_dim)
-        self.last_action = action.copy()
 
-        # Application du délai
+        action = int(action)
+
+        self.last_action = np.array([action], dtype=np.float32)
+
         if self.max_delay > 0:
             self.delay_queue.append(action)
+
             if len(self.delay_queue) > self.current_delay:
                 exec_action = self.delay_queue.popleft()
             else:
-                exec_action = np.zeros(self.action_dim, dtype=np.float32)
+                exec_action = 0
         else:
             exec_action = action
 
         obs, reward, terminated, truncated, info = self.env.step(exec_action)
 
         obs = np.asarray(obs, dtype=np.float32)
+
         obs = np.concatenate([obs, self.last_action])
 
         return obs, reward, terminated, truncated, info
+
+
+def step(self, action):
+
+    # gérer Discrete vs Box
+    if isinstance(self.env.action_space, gym.spaces.Discrete):
+        action = int(action)
+        self.last_action = np.array([action], dtype=np.float32)
+    else:
+        action = np.asarray(action, dtype=np.float32).reshape(self.action_dim)
+        self.last_action = action.copy()
+
+    if self.max_delay > 0:
+        self.delay_queue.append(action)
+
+        if len(self.delay_queue) > self.current_delay:
+            exec_action = self.delay_queue.popleft()
+        else:
+            exec_action = 0 if isinstance(self.env.action_space, gym.spaces.Discrete) else np.zeros(self.action_dim, dtype=np.float32)
+    else:
+        exec_action = action
+
+    obs, reward, terminated, truncated, info = self.env.step(exec_action)
+
+    obs = np.asarray(obs, dtype=np.float32)
+    obs = np.concatenate([obs, self.last_action])
+
+    return obs, reward, terminated, truncated, info
