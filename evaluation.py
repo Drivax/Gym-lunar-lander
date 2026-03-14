@@ -15,10 +15,10 @@ from envs.wrappers import NoisyObservations, ActionDelayAwareEval
 # CONFIG
 # =========================================================
 
-MODEL_PATH = "models/ppo_lunar_lander_robust_final"
+MODEL_PATH = "models/ppo_lunar_lander_final"
 VECNORM_PATH = "models/vecnorm_phase3.pkl"
 
-USE_PERTURBATIONS = True
+USE_PERTURBATIONS = False
 N_EPISODES = 50
 
 GIF_FOLDER = Path("gifs_eval")
