@@ -80,17 +80,17 @@ def create_model(env):
     model = PPO(
         "MlpPolicy",
         env,
-        learning_rate=3e-4,
         n_steps=1024,
         batch_size=256,
         n_epochs=10,
         gamma=0.99,
-        gae_lambda=0.82,     # FIX important
-        clip_range=0.32,     # FIX important
-        ent_coef=0.0,      # FIX important
-        vf_coef=0.5,
+        learning_rate = 7e-5,
+        gae_lambda = 0.88,
+        clip_range = 0.28,
+        ent_coef = 0.003,
+        vf_coef = 0.45,
+        target_kl = 0.025,
         max_grad_norm=0.5,
-        target_kl=0.03,
         policy_kwargs=dict(
             net_arch=[256, 256],
             activation_fn=torch.nn.Tanh,
