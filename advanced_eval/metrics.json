@@ -1,0 +1,9 @@
+{
+    "reward_mean": 139.77784729003906,
+    "reward_std": 89.28711700439453,
+    "entropy_mean": 0.9829078056253101,
+    "entropy_std": 0.242260875907077,
+    "kl_mean": 0.0,
+    "instability": 89.28711700439453,
+    "catastrophic_forgetting": 2.75311279296875
+}

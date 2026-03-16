@@ -15,7 +15,7 @@ from envs.wrappers import NoisyObservations, ActionDelayAwareEval
 # CONFIG
 # =========================================================
 
-MODEL_PATH = "models/ppo_lunar_lander_final"
+MODEL_PATH = "models/ppo_baseline"
 VECNORM_PATH = "models/vecnorm_phase3.pkl"
 
 USE_PERTURBATIONS = False
@@ -34,6 +34,7 @@ SEED = 123
 def make_env(seed):
 
     def _init():
+
         env = gym.make(
             "LunarLander-v3",
             render_mode="rgb_array",
@@ -44,7 +45,8 @@ def make_env(seed):
 
         env.reset(seed=seed)
 
-        env = ActionDelayAwareEval(env, max_delay=3)
+        # IMPORTANT : même wrapper EXACT
+        env = ActionDelayAware(env, max_delay=3)
 
         if USE_PERTURBATIONS:
             env = NoisyObservations(env, noise_std=0.08)
@@ -52,6 +54,7 @@ def make_env(seed):
         return env
 
     return _init
+
 
 
 # =========================================================

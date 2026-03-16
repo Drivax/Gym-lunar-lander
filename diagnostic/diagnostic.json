@@ -1,0 +1,23 @@
+{
+    "episodes": 100,
+    "success_count": 100,
+    "failure_count": 0,
+    "neutral_count": 0,
+    "success_rate": 1.0,
+    "surcontrol": true,
+    "oscillates": true,
+    "optimal_policy": true,
+    "generalizes_wind": true,
+    "overfit": false,
+    "bangbang_control": true,
+    "mean_reward": 282.94891357421875,
+    "reward_std": 19.46548080444336,
+    "control_energy": 614.07,
+    "oscillation_index": 7.97804314839113,
+    "wind_rewards": [
+        276.98602294921875,
+        277.93194580078125,
+        278.36248779296875,
+        278.58740234375
+    ]
+}
