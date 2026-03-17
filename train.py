@@ -3,8 +3,12 @@ import torch
 import numpy as np
 import random
 from pathlib import Path
+import matplotlib
+matplotlib.use("Agg")  # backend hors écran
 import matplotlib.pyplot as plt
-import matplotlib.pyplot as plt
+import numpy as np
+import imageio.v3 as iio
+
 import seaborn as sns
 import pandas as pd
 from scipy.stats import entropy
@@ -713,6 +717,64 @@ def record_policy_gif(
     env.close()
 
     imageio.mimsave(GIF_DIR / filename, frames, fps=30)
+def trajectory_overlay_gif(model_path, n_episodes=3, save_dir="gifs"):
+    from pathlib import Path
+    import gymnasium as gym
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import imageio.v3 as iio
+    from stable_baselines3 import PPO
+
+    save_dir = Path(save_dir)
+    save_dir.mkdir(exist_ok=True)
+
+    env = gym.make("LunarLander-v3", render_mode="rgb_array")
+    model = PPO.load(model_path, env=None)
+
+    for ep in range(n_episodes):
+        obs, _ = env.reset(seed=42 + ep)
+        done = False
+        frames = []
+        positions = []
+
+        while not done:
+            action, _ = model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+
+            frame = env.render()
+            frames.append(frame)
+            positions.append(obs[:2])
+
+        positions = np.array(positions)
+        gif_frames = []
+
+        for i, frame in enumerate(frames):
+            fig, ax = plt.subplots(figsize=(6,6))
+            ax.imshow(frame)
+            traj_x = positions[:i+1,0]
+            traj_y = positions[:i+1,1]
+            x_norm = (traj_x - traj_x.min()) / (traj_x.max() - traj_x.min() + 1e-6) * frame.shape[1]
+            y_norm = frame.shape[0] - (traj_y - traj_y.min()) / (traj_y.max() - traj_y.min() + 1e-6) * frame.shape[0]
+            ax.plot(x_norm, y_norm, color='red', linewidth=2)
+            ax.axis("off")
+            fig.canvas.draw()
+
+            # Conversion ARGB -> RGB compatible toutes versions
+            buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
+            buf.shape = (fig.canvas.get_width_height()[::-1][0],
+                         fig.canvas.get_width_height()[::-1][1], 4)
+            # ARGB -> RGB
+            img = buf[:,:,[1,2,3]]
+            plt.close(fig)
+            gif_frames.append(img)
+
+        gif_path = save_dir / f"trajectory_overlay_ep{ep:03d}.gif"
+        iio.imwrite(gif_path, gif_frames, fps=15)
+        print("Saved GIF:", gif_path)
+
+    env.close()
+
 
 # =========================
 # MAIN
@@ -741,27 +803,31 @@ if __name__ == "__main__":
     #     wind_power=0,
     # )
     # print("\nTraining pipeline finished.")
-    record_policy_gif(
-        "models/ppo_final.zip",
-        "models/vecnorm_baseline.pkl",
-        wind_power=0,
-        filename="perfect_landing.gif",
-    )
-    record_policy_gif(
-        "models/ppo_final.zip",
-        "models/vecnorm_baseline.pkl",
-        wind_power=6,
-        filename="wind_robustness.gif",
-    )
-    record_policy_gif(
-        "models/ppo_baseline.zip",
-        "models/vecnorm_baseline.pkl",
-        wind_power=2,
-        filename="failure.gif",
-    )
-    record_policy_gif(
-        "models/best_baseline/best_model.zip",
-        "models/vecnorm_baseline.pkl",
-        wind_power=0,
-        filename="early_training.gif",
-    )
+    # record_policy_gif(
+    #     "models/ppo_final.zip",
+    #     "models/vecnorm_baseline.pkl",
+    #     wind_power=0,
+    #     filename="perfect_landing.gif",
+    # )
+    # record_policy_gif(
+    #     "models/ppo_final.zip",
+    #     "models/vecnorm_baseline.pkl",
+    #     wind_power=6,
+    #     filename="wind_robustness.gif",
+    # )
+    # record_policy_gif(
+    #     "models/ppo_baseline.zip",
+    #     "models/vecnorm_baseline.pkl",
+    #     wind_power=2,
+    #     filename="failure.gif",
+    # )
+    # record_policy_gif(
+    #     "models/best_baseline/best_model.zip",
+    #     "models/vecnorm_baseline.pkl",
+    #     wind_power=0,
+    #     filename="early_training.gif",
+    # )
+    trajectory_overlay_gif(
+        model_path="models/ppo_final.zip",
+        n_episodes=10,
+        save_dir="gifs"    )
