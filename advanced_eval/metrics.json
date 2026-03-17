@@ -1,9 +1,12 @@
 {
-    "reward_mean": 139.77784729003906,
-    "reward_std": 89.28711700439453,
-    "entropy_mean": 0.9829078056253101,
-    "entropy_std": 0.242260875907077,
+    "reward_mean": 275.4732666015625,
+    "reward_std": 42.905555725097656,
+    "entropy_mean": 0.4174534260646704,
+    "entropy_std": 0.3240422878998123,
     "kl_mean": 0.0,
-    "instability": 89.28711700439453,
-    "catastrophic_forgetting": 2.75311279296875
+    "instability": 42.905555725097656,
+    "catastrophic_forgetting": 0.943634033203125,
+    "landing_distribution": {
+        "UNSTABLE": 100
+    }
 }

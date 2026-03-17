@@ -33,7 +33,8 @@ MODEL_DIR = Path("models")
 LOG_DIR.mkdir(exist_ok=True)
 MODEL_DIR.mkdir(exist_ok=True)
 
-
+GIF_DIR = Path("gifs")
+GIF_DIR.mkdir(exist_ok=True)
 # =========================
 # SEED
 # =========================
@@ -244,12 +245,12 @@ def evaluate_model(
     lengths = []
     entropies = []
     kl_vals = []
+    landing_types = []
 
     for ep in range(n_episodes):
 
         obs = env.reset()
         done = False
-
         ep_reward = 0
         steps = 0
         prev_dist = None
@@ -261,11 +262,9 @@ def evaluate_model(
             obs_tensor = torch.as_tensor(obs).to(model.device)
             dist = model.policy.get_distribution(obs_tensor)
 
-            # ===== ENTROPY =====
             ent = dist.distribution.entropy().mean().item()
             entropies.append(ent)
 
-            # ===== KL DRIFT =====
             if prev_dist is not None:
                 kl = torch.distributions.kl_divergence(
                     prev_dist.distribution,
@@ -276,15 +275,27 @@ def evaluate_model(
             prev_dist = dist
 
             obs, reward, done_vec, info = env.step(action)
-            done = done_vec[0]
 
-            state_vec = obs[0][:6]
+            if done_vec[0]:
+                terminal_state = info[0].get("terminal_observation", obs[0])
+                done = True
+            else:
+                done = False
 
+            state_vec = obs[0]
             all_positions.append((state_vec[0], state_vec[1]))
             all_velocities.append((state_vec[2], state_vec[3]))
 
             ep_reward += reward[0]
             steps += 1
+
+        terminal_state = info[0].get("terminal_observation", obs[0])
+        landing_type = true_success_metric(
+            terminal_state,
+            True,
+            ep_reward
+        )
+        landing_types.append(landing_type)
 
         rewards.append(ep_reward)
         lengths.append(steps)
@@ -296,69 +307,30 @@ def evaluate_model(
     vel = np.array(all_velocities)
 
     # ========================
-    # SUCCESS HEATMAP
+    # LANDING DISTRIBUTION
     # ========================
 
-    plt.figure(figsize=(8,6))
-    sns.kdeplot(x=pos[:,0], y=pos[:,1], fill=True)
-    plt.title("Success Heatmap")
-    plt.savefig(save_dir / "success_heatmap.png")
+    from collections import Counter
+    landing_counts = Counter(landing_types)
+
+    plt.figure(figsize=(8,5))
+    plt.bar(landing_counts.keys(), landing_counts.values())
+    plt.title("Landing Quality Distribution")
+    plt.xticks(rotation=30)
+    plt.savefig(save_dir / "landing_quality.png")
     plt.close()
 
     # ========================
-    # PHASE PORTRAIT
-    # ========================
-
-    plt.figure(figsize=(8,6))
-    plt.hexbin(vel[:,0], vel[:,1], gridsize=50)
-    plt.title("Phase Portrait Velocity")
-    plt.savefig(save_dir / "phase_portrait.png")
-    plt.close()
-
-    # ========================
-    # ENTROPY CURVE
+    # OTHER METRICS
     # ========================
 
     entropy_mean = float(np.mean(entropies))
     entropy_std = float(np.std(entropies))
-
-    plt.figure()
-    plt.plot(entropies)
-    plt.title("Policy Entropy")
-    plt.savefig(save_dir / "entropy_curve.png")
-    plt.close()
-
-    # ========================
-    # KL DRIFT
-    # ========================
-
-    if len(kl_vals) > 0:
-        kl_mean = float(np.mean(kl_vals))
-
-        plt.figure()
-        plt.plot(kl_vals)
-        plt.title("KL Drift")
-        plt.savefig(save_dir / "kl_drift.png")
-        plt.close()
-    else:
-        kl_mean = 0.0
-
-    # ========================
-    # INSTABILITY
-    # ========================
-
+    kl_mean = float(np.mean(kl_vals)) if len(kl_vals) > 0 else 0.0
     instability = float(np.std(rewards))
-
-    # ========================
-    # CATASTROPHIC FORGETTING
-    # ========================
 
     mid = len(rewards)//2
     forgetting_score = float(rewards[:mid].mean() - rewards[mid:].mean())
-
-    # ========================
-    # SAVE METRICS
-    # ========================
 
     metrics = {
         "reward_mean": float(rewards.mean()),
@@ -368,6 +340,7 @@ def evaluate_model(
         "kl_mean": kl_mean,
         "instability": instability,
         "catastrophic_forgetting": forgetting_score,
+        "landing_distribution": dict(landing_counts),
     }
 
     with open(save_dir / "metrics.json", "w") as f:
@@ -376,6 +349,74 @@ def evaluate_model(
     print("\n===== ADVANCED EVAL =====")
     for k, v in metrics.items():
         print(k, ":", v)
+
+def landing_quality_distribution(
+    model_path,
+    vecnorm_path,
+    wind_power=0,
+    n_episodes=100,
+):
+
+    env = make_vec_env(
+        1,
+        wind_power=wind_power,
+        vecnorm_path=vecnorm_path,
+    )
+
+    env.training = False
+    env.norm_reward = False
+
+    model = PPO.load(model_path, env=env)
+
+    landing_results = []
+
+    for ep in range(n_episodes):
+
+        obs = env.reset()
+        done = False
+        ep_reward = 0
+
+        while not done:
+
+            action, _ = model.predict(obs, deterministic=True)
+            obs, reward, done_vec, info = env.step(action)
+            done = done_vec[0]
+            ep_reward += reward[0]
+
+        final_state = obs[0]
+
+        landing_type = true_success_metric(
+            final_state,
+            done,
+            ep_reward
+        )
+
+        landing_results.append(landing_type)
+
+    env.close()
+
+    # ======================
+    # Distribution
+    # ======================
+
+    from collections import Counter
+    counts = Counter(landing_results)
+
+    print("\n===== LANDING QUALITY =====")
+    for k, v in counts.items():
+        print(k, ":", v, f"({v/n_episodes*100:.1f}%)")
+
+    # ======================
+    # Plot
+    # ======================
+
+    plt.figure(figsize=(8,5))
+    plt.bar(counts.keys(), counts.values())
+    plt.title("Landing Quality Distribution")
+    plt.xticks(rotation=30)
+    plt.show()
+
+    return counts
 
 def policy_diagnostic(
     model_path,
@@ -432,13 +473,15 @@ def policy_diagnostic(
         actions = np.array(actions)
         control_energy.append(np.sum(actions**2))
 
-        # ===== SUCCESS / FAILURE =====
-        if ep_reward > 200:
+        landing_type = true_success_metric(obs[0], done, ep_reward)
+
+        if landing_type in ["PERFECT_LANDING", "GOOD_LANDING"]:
             success_count += 1
-        elif ep_reward < 0:
+        elif landing_type == "CRASH":
             failure_count += 1
         else:
             neutral_count += 1
+
 
     env.close()
 
@@ -558,6 +601,118 @@ def policy_diagnostic(
     print("\n===== POLICY DIAGNOSTIC =====")
     for k, v in diagnostics.items():
         print(k, ":", v)
+def true_success_metric(state, done, reward):
+
+    x = state[0]
+    y = state[1]
+    vx = state[2]
+    vy = state[3]
+    angle = state[4]
+    angular_vel = state[5]
+    left_contact = state[6]
+    right_contact = state[7]
+
+    dist_pad = np.sqrt(x**2 + y**2)
+
+    # ======================
+    # CRASH
+    # ======================
+
+    if done and reward < -50:
+        return "CRASH"
+
+    # ======================
+    # PERFECT LANDING
+    # ======================
+
+    if (
+        abs(vx) < 0.05
+        and abs(vy) < 0.1
+        and abs(angle) < 0.05
+        and abs(angular_vel) < 0.1
+        and dist_pad < 0.1
+        and left_contact
+        and right_contact
+    ):
+        return "PERFECT_LANDING"
+
+    # ======================
+    # GOOD LANDING
+    # ======================
+
+    if (
+        abs(vx) < 0.1
+        and abs(vy) < 0.2
+        and abs(angle) < 0.1
+        and abs(angular_vel) < 0.2
+        and dist_pad < 0.2
+    ):
+        return "GOOD_LANDING"
+
+    # ======================
+    # HARD LANDING
+    # ======================
+
+    if (
+        abs(vx) < 0.3
+        and abs(vy) < 0.5
+        and dist_pad < 0.3
+    ):
+        return "HARD_LANDING"
+
+    # ======================
+    # UNSTABLE
+    # ======================
+
+    return "UNSTABLE"
+import imageio
+import imageio
+
+def record_policy_gif(
+    model_path,
+    vecnorm_path,
+    wind_power=0,
+    filename="run.gif",
+    deterministic=True,
+    max_steps=1000,
+):
+
+    env = gym.make(
+        ENV_ID,
+        enable_wind=wind_power > 0,
+        wind_power=wind_power,
+        turbulence_power=0.5 if wind_power > 0 else 0,
+        render_mode="rgb_array",
+    )
+
+    model = PPO.load(model_path)
+
+    # load normalization stats
+    vecnorm = VecNormalize.load(vecnorm_path, SubprocVecEnv([lambda: Monitor(gym.make(ENV_ID))]))
+    vecnorm.training = False
+    vecnorm.norm_reward = False
+
+    obs, _ = env.reset()
+
+    frames = []
+
+    for _ in range(max_steps):
+
+        frame = env.render()
+        frames.append(frame)
+
+        obs_norm = vecnorm.normalize_obs(obs)
+
+        action, _ = model.predict(obs_norm, deterministic=deterministic)
+
+        obs, reward, terminated, truncated, _ = env.step(action)
+
+        if terminated or truncated:
+            break
+
+    env.close()
+
+    imageio.mimsave(GIF_DIR / filename, frames, fps=30)
 
 # =========================
 # MAIN
@@ -580,9 +735,33 @@ if __name__ == "__main__":
     #     "models/vecnorm_baseline.pkl",
     #     wind_power=2,
     # )
-    policy_diagnostic(
+    # policy_diagnostic(
+    #     "models/ppo_final.zip",
+    #     "models/vecnorm_baseline.pkl",
+    #     wind_power=0,
+    # )
+    # print("\nTraining pipeline finished.")
+    record_policy_gif(
         "models/ppo_final.zip",
         "models/vecnorm_baseline.pkl",
         wind_power=0,
+        filename="perfect_landing.gif",
     )
-    # print("\nTraining pipeline finished.")
+    record_policy_gif(
+        "models/ppo_final.zip",
+        "models/vecnorm_baseline.pkl",
+        wind_power=6,
+        filename="wind_robustness.gif",
+    )
+    record_policy_gif(
+        "models/ppo_baseline.zip",
+        "models/vecnorm_baseline.pkl",
+        wind_power=2,
+        filename="failure.gif",
+    )
+    record_policy_gif(
+        "models/best_baseline/best_model.zip",
+        "models/vecnorm_baseline.pkl",
+        wind_power=0,
+        filename="early_training.gif",
+    )
