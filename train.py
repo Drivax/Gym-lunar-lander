@@ -1,4 +1,5 @@
 import gymnasium as gym
+import argparse
 import torch
 import numpy as np
 import random
@@ -781,53 +782,63 @@ def trajectory_overlay_gif(model_path, n_episodes=3, save_dir="gifs"):
 # =========================
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Train and evaluate PPO on LunarLander with phased settings."
+    )
+    parser.add_argument(
+        "--phase",
+        choices=["baseline", "finetune", "advanced-eval", "diagnostic", "overlay-gif"],
+        default="baseline",
+        help="Pipeline step to run.",
+    )
+    parser.add_argument(
+        "--model-path",
+        default="models/ppo_final.zip",
+        help="Model path for eval/diagnostic/gif phases.",
+    )
+    parser.add_argument(
+        "--vecnorm-path",
+        default="models/vecnorm_baseline.pkl",
+        help="VecNormalize stats path for eval/diagnostic phases.",
+    )
+    parser.add_argument(
+        "--wind-power",
+        type=float,
+        default=0.0,
+        help="Wind power for evaluation phases.",
+    )
+    parser.add_argument(
+        "--episodes",
+        type=int,
+        default=100,
+        help="Number of episodes for eval/diagnostic/gif phases.",
+    )
+
+    args = parser.parse_args()
 
     set_seed(SEED)
 
-    # train_baseline()
-    # evaluate_model(
-    #     "models/ppo_baseline.zip",
-    #     "models/vecnorm_baseline.pkl",
-    #     wind_power=0,
-    # )
-
-    # fine_tune()
-    # evaluate_model(
-    #     "models/ppo_final.zip",
-    #     "models/vecnorm_baseline.pkl",
-    #     wind_power=2,
-    # )
-    # policy_diagnostic(
-    #     "models/ppo_final.zip",
-    #     "models/vecnorm_baseline.pkl",
-    #     wind_power=0,
-    # )
-    # print("\nTraining pipeline finished.")
-    # record_policy_gif(
-    #     "models/ppo_final.zip",
-    #     "models/vecnorm_baseline.pkl",
-    #     wind_power=0,
-    #     filename="perfect_landing.gif",
-    # )
-    # record_policy_gif(
-    #     "models/ppo_final.zip",
-    #     "models/vecnorm_baseline.pkl",
-    #     wind_power=6,
-    #     filename="wind_robustness.gif",
-    # )
-    # record_policy_gif(
-    #     "models/ppo_baseline.zip",
-    #     "models/vecnorm_baseline.pkl",
-    #     wind_power=2,
-    #     filename="failure.gif",
-    # )
-    # record_policy_gif(
-    #     "models/best_baseline/best_model.zip",
-    #     "models/vecnorm_baseline.pkl",
-    #     wind_power=0,
-    #     filename="early_training.gif",
-    # )
-    trajectory_overlay_gif(
-        model_path="models/ppo_final.zip",
-        n_episodes=10,
-        save_dir="gifs"    )
+    if args.phase == "baseline":
+        train_baseline()
+    elif args.phase == "finetune":
+        fine_tune()
+    elif args.phase == "advanced-eval":
+        evaluate_model(
+            model_path=args.model_path,
+            vecnorm_path=args.vecnorm_path,
+            wind_power=args.wind_power,
+            n_episodes=args.episodes,
+        )
+    elif args.phase == "diagnostic":
+        policy_diagnostic(
+            model_path=args.model_path,
+            vecnorm_path=args.vecnorm_path,
+            wind_power=args.wind_power,
+            n_episodes=args.episodes,
+        )
+    elif args.phase == "overlay-gif":
+        trajectory_overlay_gif(
+            model_path=args.model_path,
+            n_episodes=args.episodes,
+            save_dir="gifs",
+        )
